@@ -12,10 +12,7 @@ print_ti=False
 print_Kij=False
 print_gantt_chart=False
 
-TimeLimit=3600  # secondes
-eps=0.5
-coeff=0.0001
-
+TimeLimit=10  # secondes
 
 ################### Lecture fichier ###################
 
@@ -103,6 +100,9 @@ for i in range(nbArcs):
 
 K=[]
 c=0;
+coeff=1e-15
+eps=0.5
+
 for l in range(nbMachines):
     for k in range(nbTachesMachine[l]):
         for j in range(k+1,nbTachesMachine[l]) :
@@ -126,48 +126,53 @@ l=[0]*len(penalties)
 s=[0]*len(penalties)
 
 ######################### Run program ############################
-sum_p=[]
+sum_p,alpha=[],[]
 start_time=time.time()
-for k in range(2):
+for k in range(100):
     m.maximize(tau
                +sum(
                     # Penalties for dualized constraints
                     l_j*p_j for l_j,p_j in zip(l, penalties)))
     solution=m.solve()
-    if solution.get_value('tau')==0:
-        alpha=m.infinity
-    else: alpha=1/solution.get_value('tau')
-    obj=solution.get_objective_value()
-    if obj==0:
-        inv_obj=m.infinity
-    else: inv_obj=1/obj
-    #print('penalties =',[solution.get_value('p'+str(i)) for i in range(len(penalties))])
+
+
+    #Case 1 : Problem infeasible
+    if str(m.get_solve_status())!="JobSolveStatus.OPTIMAL_SOLUTION":
+        stop=True
+        print('feasible solution not found')
+        if len(alpha): print('lower bound = ',alpha[-2])
+        break
+
+    #Case 2 : Divergence
+    if len(sum_p)>=2 and sum_p[-1]>5*sum_p[-2]:
+        stop=True
+        print('feasible solution not found')
+        if len(alpha)>=2: print('lower bound = ',alpha[-2])
+        break
+
+    #Case 3 : No problem
+    if solution.get_value('tau')<=1e-100:
+        alpha.append(m.infinity)
+    else: alpha.append(1/solution.get_value('tau'))
     sum_p.append(sum([abs(solution.get_value('p'+str(i))) for i in range(len(penalties))]))
-    print(sum_p[-1],"     ",1/solution.get_value('tau'),"         ",time.time()-start_time)
-
-
-# Test for complementary slackness
+    print(sum_p[-1],"     ",alpha[-1],"         ",time.time()-start_time)
     stop=True
     for i in range(len(penalties)):
         if abs(solution.get_value('p'+str(i)))>eps:
             stop=False
             break
-        
     if stop:
         print('primal feasible & optimal')
-        opt=1
         break
-    
-    else:
-        LB=1.0/(max((max(LBj)*0.5),max(LBm)))
-        for i in range(len(penalties)):
-            if solution.get_value('p'+str(i))!=0:
-                s[i]=coeff/solution.get_value('p'+str(i))**2
-            l[i]+=-s[i]*(solution.get_value('p'+str(i)))
+    LB=1.0/(max((max(LBj)*0.5),max(LBm)))
+    for i in range(len(penalties)):
+        if solution.get_value('p'+str(i))!=0:
+            s[i]=coeff/solution.get_value('p'+str(i))**2
+        l[i]+=-s[i]*(solution.get_value('p'+str(i)))
+    if len(sum_p)>=2 and sum_p[-1]==sum_p[-2]:  coeff=coeff*5
+    else : coeff=coeff/2
 
-if not stop:
-    print('feasible solution not found')
-    print('lower bound = ',1/solution.get_value('tau'))
+
 
 
 run_time=time.time()-start_time
